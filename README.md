@@ -107,6 +107,12 @@ A healthy mouse produces nothing below 30 ms. A faulty one shows a cluster down 
 the single digits, separated from real clicks by an empty band — and that empty
 band is where the threshold belongs.
 
+A short measurement rarely settles it. Faults are rare, and the band only becomes
+visible after thousands of clicks, so the tray application keeps its counters in
+`%APPDATA%\ChatterFix\statistics.json` and carries them across restarts. Leave it
+running for a few days and the statistics window will have an answer the first ten
+minutes could not give.
+
 ## Configuration
 
 Settings live in `%APPDATA%\ChatterFix\config.json`. The file can be edited by
@@ -125,7 +131,7 @@ src/
   ChatterFix.App/           Tray application (WinForms)
   ChatterFix.Cli/           Diagnostics and measurement tool
 tests/
-  ChatterFix.Tests/         40 tests, including a 20,000-step balance invariant
+  ChatterFix.Tests/         46 tests, including a 20,000-step balance invariant
 ```
 
 ## Pitfalls

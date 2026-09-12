@@ -53,6 +53,35 @@ public sealed class ButtonStatistics
     internal void AddOrphan() => Interlocked.Increment(ref _orphanSuppressed);
     internal void AddReleaseRepair() => Interlocked.Increment(ref _releaseRepairs);
 
+    /// <summary>Everything needed to rebuild these counters after a restart.</summary>
+    public sealed record State(
+        long Downs,
+        long Ups,
+        long ChatterSuppressed,
+        long OrphanSuppressed,
+        long ReleaseRepairs,
+        IntervalHistogram.State ReleaseGap,
+        IntervalHistogram.State PressDuration);
+
+    public State CaptureState() => new(
+        Downs, Ups, ChatterSuppressed, OrphanSuppressed, ReleaseRepairs,
+        ReleaseGap.CaptureState(),
+        PressDuration.CaptureState());
+
+    public void RestoreState(State? state)
+    {
+        if (state is null) return;
+
+        Interlocked.Exchange(ref _downs, state.Downs);
+        Interlocked.Exchange(ref _ups, state.Ups);
+        Interlocked.Exchange(ref _chatterSuppressed, state.ChatterSuppressed);
+        Interlocked.Exchange(ref _orphanSuppressed, state.OrphanSuppressed);
+        Interlocked.Exchange(ref _releaseRepairs, state.ReleaseRepairs);
+
+        ReleaseGap.RestoreState(state.ReleaseGap);
+        PressDuration.RestoreState(state.PressDuration);
+    }
+
     public void Reset()
     {
         Interlocked.Exchange(ref _downs, 0);
@@ -100,6 +129,22 @@ public sealed class ClickStatistics
             foreach (var button in _buttons) sum += button.ReleaseRepairs;
             return sum;
         }
+    }
+
+    public ButtonStatistics.State[] CaptureState()
+    {
+        var states = new ButtonStatistics.State[ButtonCount];
+        for (int i = 0; i < ButtonCount; i++) states[i] = _buttons[i].CaptureState();
+        return states;
+    }
+
+    /// <summary>Restores counters from a previous session. Extra or missing entries are ignored.</summary>
+    public void RestoreState(ButtonStatistics.State[]? states)
+    {
+        if (states is null) return;
+
+        for (int i = 0; i < ButtonCount && i < states.Length; i++)
+            _buttons[i].RestoreState(states[i]);
     }
 
     public void Reset()

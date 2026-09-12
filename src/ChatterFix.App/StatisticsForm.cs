@@ -11,15 +11,17 @@ namespace ChatterFix.App;
 /// </summary>
 internal sealed class StatisticsForm : Form
 {
+    private readonly IStatisticsSession _session;
     private readonly ClickFilter _filter;
     private readonly ListView _buttonList = new();
     private readonly ListView _histogram = new();
     private readonly Label _summary = new();
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 500 };
 
-    public StatisticsForm(ClickFilter filter)
+    public StatisticsForm(IStatisticsSession session)
     {
-        _filter = filter;
+        _session = session;
+        _filter = session.Filter;
 
         Text = "ChatterFix statistics";
         StartPosition = FormStartPosition.CenterScreen;
@@ -80,7 +82,17 @@ internal sealed class StatisticsForm : Form
         var reset = new Button { Text = "Reset counters", Dock = DockStyle.Bottom, Height = 30 };
         reset.Click += (_, _) =>
         {
-            _filter.Statistics.Reset();
+            var answer = MessageBox.Show(
+                "Clear every recorded click and start again from now?" + Environment.NewLine + Environment.NewLine
+                + "The record so far is what shows whether the switch is getting worse, "
+                + "so it is worth keeping unless you have just changed mice.",
+                "ChatterFix",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (answer != DialogResult.Yes) return;
+
+            _session.ResetCounters();
             UpdateView(force: true);
         };
 
@@ -100,13 +112,20 @@ internal sealed class StatisticsForm : Form
         var stats = _filter.Statistics;
         var settings = _filter.Settings;
 
+        var recordedFor = DateTimeOffset.Now - _session.RecordingSince;
+        string period = recordedFor.TotalDays >= 1
+            ? $"{recordedFor.TotalDays:F1} days"
+            : recordedFor.TotalHours >= 1
+                ? $"{recordedFor.TotalHours:F1} hours"
+                : $"{recordedFor.TotalMinutes:F0} minutes";
+
         _summary.Text =
             $"Threshold {settings.Buttons[0].ChatterThresholdMs} ms   ·   "
             + $"drop repair {settings.Buttons[0].ReleaseDelayMs} ms   ·   "
             + (settings.Enabled ? "protecting" : "paused")
             + Environment.NewLine
             + $"Blocked {stats.TotalChatterSuppressed} faulty clicks and repaired "
-            + $"{stats.TotalReleaseRepairs} dropped connections since start.";
+            + $"{stats.TotalReleaseRepairs} dropped connections over {period} of recording.";
 
         UpdateButtonList(stats);
         UpdateHistogram(stats[MouseButton.Left]);

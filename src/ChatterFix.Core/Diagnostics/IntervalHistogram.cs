@@ -133,6 +133,31 @@ public sealed class IntervalHistogram
         return -1;
     }
 
+    /// <summary>Everything needed to rebuild this histogram after a restart.</summary>
+    public sealed record State(long[] Counts, long Total, long SumUs, long MinUs, long MaxUs);
+
+    public State CaptureState() => new(
+        Snapshot(),
+        Interlocked.Read(ref _total),
+        Interlocked.Read(ref _sumUs),
+        Interlocked.Read(ref _minUs),
+        Interlocked.Read(ref _maxUs));
+
+    /// <summary>
+    /// Restores counters saved by a previous session. A state from an older build with
+    /// a different bucket layout is ignored rather than silently misplacing counts.
+    /// </summary>
+    public void RestoreState(State? state)
+    {
+        if (state is null || state.Counts.Length != _counts.Length) return;
+
+        for (int i = 0; i < _counts.Length; i++) Interlocked.Exchange(ref _counts[i], state.Counts[i]);
+        Interlocked.Exchange(ref _total, state.Total);
+        Interlocked.Exchange(ref _sumUs, state.SumUs);
+        Interlocked.Exchange(ref _minUs, state.MinUs);
+        Interlocked.Exchange(ref _maxUs, state.MaxUs);
+    }
+
     public void Reset()
     {
         for (int i = 0; i < _counts.Length; i++) Interlocked.Exchange(ref _counts[i], 0);
