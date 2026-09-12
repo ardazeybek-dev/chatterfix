@@ -34,6 +34,7 @@ internal static class Program
 
         bool protect = args.Contains("--protect");
         int threshold = ReadIntOption(args, "--threshold", 25);
+        int releaseDelay = ReadIntOption(args, "--release-delay", 12);
         int seconds = ReadIntOption(args, "--seconds", 0);
         bool quiet = args.Contains("--quiet");
         string? reportPath = ReadStringOption(args, "--report");
@@ -42,10 +43,19 @@ internal static class Program
         {
             Mode = protect ? FilterMode.Protect : FilterMode.Monitor,
             Enabled = true,
-            Buttons = [.. FilterSettings.CreateDefaultButtons().Select(b => b with { ChatterThresholdMs = threshold })],
+            Buttons =
+            [
+                .. FilterSettings.CreateDefaultButtons()
+                    .Select(b => b with { ChatterThresholdMs = threshold, ReleaseDelayMs = releaseDelay })
+            ],
         };
 
-        var filter = new ClickFilter(settings);
+        // Disposed after the hook, so any release still held back is sent on the way out.
+        using var releaseGate = protect && releaseDelay > 0
+            ? new ReleaseScheduler(MonotonicClock.NowMicroseconds, b => InputInjector.SendButton(b, MouseEventKind.Up))
+            : null;
+
+        var filter = new ClickFilter(settings, releaseGate: releaseGate);
         using var hook = new LowLevelMouseHook(filter);
 
         try
@@ -224,7 +234,8 @@ internal static class Program
         AppendLine(sb, "");
 
         string mode = protect
-            ? $"PROTECT (threshold {settings.Buttons[0].ChatterThresholdMs} ms — faulty clicks are blocked)"
+            ? $"PROTECT (chatter threshold {settings.Buttons[0].ChatterThresholdMs} ms, "
+              + $"drop repair {settings.Buttons[0].ReleaseDelayMs} ms)"
             : "MONITOR (nothing is blocked, clicks are only measured)";
 
         AppendLine(sb, $"  Mode     : {mode}");
@@ -374,7 +385,10 @@ internal static class Program
         }
 
         if (filter.Settings.Mode == FilterMode.Protect)
+        {
             Console.WriteLine($"  Faulty clicks blocked in this session: {stats.TotalChatterSuppressed}");
+            Console.WriteLine($"  Dropped connections repaired:          {stats.TotalReleaseRepairs}");
+        }
         else
             Console.WriteLine("  Protection was off (monitor mode). Turn it on with: chatterfix-diag --protect");
     }
@@ -447,6 +461,7 @@ internal static class Program
         Console.WriteLine("  chatterfix-diag                   Monitor mode - nothing is blocked");
         Console.WriteLine("  chatterfix-diag --protect         Protect mode - faulty clicks are blocked");
         Console.WriteLine("  chatterfix-diag --threshold 25    Chatter threshold in ms (default 25)");
+        Console.WriteLine("  chatterfix-diag --release-delay 12  Drop repair window in ms, 0 disables it");
         Console.WriteLine("  chatterfix-diag --seconds 60      Measure for 60 seconds, then exit");
         Console.WriteLine("  chatterfix-diag --quiet           Skip the live table, print progress only");
         Console.WriteLine("  chatterfix-diag --report r.json   Save the measurement as JSON");

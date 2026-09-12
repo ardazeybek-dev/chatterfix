@@ -16,14 +16,20 @@ public sealed class ClickFilter : IMouseEventSink
     private readonly ClickStatistics _statistics;
     private readonly EventRing _events;
     private readonly ButtonState[] _states;
+    private readonly IReleaseGate? _releaseGate;
 
     private volatile FilterSettings _settings;
 
-    public ClickFilter(FilterSettings? settings = null, ClickStatistics? statistics = null, EventRing? events = null)
+    public ClickFilter(
+        FilterSettings? settings = null,
+        ClickStatistics? statistics = null,
+        EventRing? events = null,
+        IReleaseGate? releaseGate = null)
     {
         _settings = settings ?? new FilterSettings();
         _statistics = statistics ?? new ClickStatistics();
         _events = events ?? new EventRing();
+        _releaseGate = releaseGate;
 
         _states = new ButtonState[ClickStatistics.ButtonCount];
         ResetState();
@@ -47,6 +53,7 @@ public sealed class ClickFilter : IMouseEventSink
             _states[i].LastDownUs = -1;
             _states[i].LastUpUs = -1;
             _states[i].SuppressedDownPending = false;
+            _states[i].ReleasePending = false;
         }
     }
 
@@ -87,6 +94,22 @@ public sealed class ClickFilter : IMouseEventSink
 
         var buttonSettings = settings.Buttons[(int)e.Button];
 
+        // A release we were holding back, followed by this press, means the contact
+        // bounced rather than the button being let go. Cancel both and the hold continues.
+        if (state.ReleasePending)
+        {
+            state.ReleasePending = false;
+
+            if (_releaseGate is not null && _releaseGate.Cancel(e.Button))
+            {
+                buttonStats.AddReleaseRepair();
+                return new FilterResult(FilterAction.Suppress, FilterReason.ReleaseRepaired, releaseGapUs);
+            }
+
+            // The release already went out, so the system considers the button up.
+            // Fall through and judge this press on its own merits.
+        }
+
         bool isChatter =
             settings.Enabled
             && settings.Mode == FilterMode.Protect
@@ -124,6 +147,24 @@ public sealed class ClickFilter : IMouseEventSink
         _statistics[e.Button].AddUp(pressDurationUs);
         state.LastUpUs = e.TimestampUs;
 
+        var buttonSettings = settings.Buttons[(int)e.Button];
+
+        bool holdRelease =
+            _releaseGate is not null
+            && settings.Enabled
+            && settings.Mode == FilterMode.Protect
+            && buttonSettings.Enabled
+            && buttonSettings.ReleaseDelayUs > 0;
+
+        if (holdRelease)
+        {
+            // Hold it briefly. If a press arrives inside the window the contact only
+            // bounced; otherwise the scheduler sends this release on our behalf.
+            state.ReleasePending = true;
+            _releaseGate!.Hold(e.Button, e.TimestampUs + buttonSettings.ReleaseDelayUs);
+            return new FilterResult(FilterAction.Defer, FilterReason.ReleaseHeld, pressDurationUs);
+        }
+
         return FilterResult.Normal(pressDurationUs);
     }
 
@@ -134,5 +175,8 @@ public sealed class ClickFilter : IMouseEventSink
 
         /// <summary>The last press was swallowed, so its release will be swallowed too.</summary>
         public bool SuppressedDownPending;
+
+        /// <summary>A release is being held back, waiting to see whether the button was really let go.</summary>
+        public bool ReleasePending;
     }
 }
