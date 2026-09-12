@@ -24,9 +24,11 @@ internal sealed class TrayApplication : IDisposable
     private readonly Icon _pausedIcon = TrayIcons.Create(active: false);
 
     private AppConfiguration _config = new();
+    private FilterProfile _activeProfile = new();
     private ClickFilter? _filter;
     private ReleaseScheduler? _scheduler;
     private LowLevelMouseHook? _hook;
+    private ForegroundWatcher? _watcher;
     private StatisticsForm? _statisticsForm;
 
     private bool _announcedFirstBlock;
@@ -35,6 +37,7 @@ internal sealed class TrayApplication : IDisposable
     public bool Start()
     {
         _config = AppConfiguration.Load();
+        _activeProfile = _config.ResolveProfile(null);
 
         if (!StartEngine()) return false;
 
@@ -57,13 +60,12 @@ internal sealed class TrayApplication : IDisposable
             MonotonicClock.NowMicroseconds,
             button => InputInjector.SendButton(button, MouseEventKind.Up));
 
-        _filter = new ClickFilter(_config.ToFilterSettings(), releaseGate: _scheduler);
+        _filter = new ClickFilter(_activeProfile.ToFilterSettings(_config.Enabled), releaseGate: _scheduler);
         _hook = new LowLevelMouseHook(_filter);
 
         try
         {
             _hook.Start();
-            return true;
         }
         catch (Exception ex)
         {
@@ -75,6 +77,23 @@ internal sealed class TrayApplication : IDisposable
                 MessageBoxIcon.Error);
             return false;
         }
+
+        _watcher = new ForegroundWatcher();
+        _watcher.ForegroundChanged += OnForegroundChanged;
+        return true;
+    }
+
+    /// <summary>
+    /// Runs on the watcher's thread. It only swaps the settings the hook reads, which
+    /// is an atomic reference assignment; the menu catches up on its own timer.
+    /// </summary>
+    private void OnForegroundChanged(string? processName)
+    {
+        var profile = _config.ResolveProfile(processName);
+        if (ReferenceEquals(profile, _activeProfile)) return;
+
+        _activeProfile = profile;
+        ApplyConfiguration();
     }
 
     private void BuildMenu()
@@ -132,7 +151,8 @@ internal sealed class TrayApplication : IDisposable
         SaveConfiguration();
     }
 
-    private void ApplyConfiguration() => _filter?.UpdateSettings(_config.ToFilterSettings());
+    private void ApplyConfiguration()
+        => _filter?.UpdateSettings(_activeProfile.ToFilterSettings(_config.Enabled));
 
     private void SaveConfiguration()
     {
@@ -156,6 +176,7 @@ internal sealed class TrayApplication : IDisposable
         if (form.ShowDialog() != DialogResult.OK) return;
 
         _config = form.Result.Sanitised();
+        _activeProfile = _config.ResolveProfile(_watcher?.CurrentProcessName);
         ApplyConfiguration();
         SaveConfiguration();
         RefreshStatus();
@@ -184,18 +205,20 @@ internal sealed class TrayApplication : IDisposable
         if (_filter is null) return;
 
         bool enabled = _config.Enabled;
+        var profile = _activeProfile;
         long blocked = _filter.Statistics.TotalChatterSuppressed;
         long repaired = _filter.Statistics.TotalReleaseRepairs;
 
         _notifyIcon.Icon = enabled ? _activeIcon : _pausedIcon;
+
         _statusItem.Text = enabled
-            ? $"Protecting  ({_config.ChatterThresholdMs} ms threshold)"
+            ? $"Protecting - {profile.Name} profile ({profile.ChatterThresholdMs} ms)"
             : "Paused - nothing is being filtered";
         _countsItem.Text = $"Blocked {blocked} faults, repaired {repaired} drops";
 
-        // The tooltip is capped at 63 characters by Windows.
+        // Windows caps the tooltip at 63 characters.
         _notifyIcon.Text = enabled
-            ? $"ChatterFix - {blocked} faults blocked"
+            ? $"ChatterFix - {profile.Name} - {blocked} blocked"
             : "ChatterFix - paused";
 
         if (enabled && blocked > 0 && !_announcedFirstBlock && _config.NotifyOnFirstBlock)
@@ -219,6 +242,8 @@ internal sealed class TrayApplication : IDisposable
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _menu.Dispose();
+
+        _watcher?.Dispose();
 
         // Stop filtering first, then flush: a release still held back would otherwise
         // leave the button pressed for every application on the system.
