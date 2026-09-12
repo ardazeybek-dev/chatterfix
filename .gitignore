@@ -1,0 +1,37 @@
+# Build çıktıları
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+publish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Ortam / gizli
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+appsettings.Local.json
+
+# Bağımlılıklar
+node_modules/
+packages/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# İşletim sistemi
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Uygulama çalışma zamanı verisi
+*.log
+logs/
+chatterfix-config.json
