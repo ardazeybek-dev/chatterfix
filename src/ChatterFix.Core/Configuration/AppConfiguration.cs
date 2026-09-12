@@ -1,14 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using ChatterFix.Core.Diagnostics;
-using ChatterFix.Core.Filtering;
 
 namespace ChatterFix.Core.Configuration;
 
 /// <summary>
 /// Settings as they are stored on disk, in a form a person can read and edit.
-/// Kept separate from <see cref="FilterSettings"/> so the runtime type can stay
-/// immutable and allocation-free on the hook path.
+/// Kept separate from the runtime types so those can stay immutable and
+/// allocation-free on the hook path.
 /// </summary>
 public sealed class AppConfiguration
 {
@@ -18,17 +16,11 @@ public sealed class AppConfiguration
     /// <summary>Start with Windows.</summary>
     public bool StartWithWindows { get; set; }
 
-    /// <summary>A press this soon after a release counts as a hardware fault.</summary>
-    public int ChatterThresholdMs { get; set; } = 25;
-
-    /// <summary>How long a release is held to see whether the contact merely bounced. 0 disables it.</summary>
-    public int ReleaseDelayMs { get; set; } = 12;
-
-    /// <summary>Which buttons are filtered, in <see cref="MouseButton"/> order.</summary>
-    public bool[] ButtonsEnabled { get; set; } = [true, true, true, true, true];
-
-    /// <summary>Show a balloon notification the first time a fault is blocked in a session.</summary>
+    /// <summary>Show a notification the first time a fault is blocked in a session.</summary>
     public bool NotifyOnFirstBlock { get; set; } = true;
+
+    /// <summary>Thresholds per foreground application. The profile with no process names is the fallback.</summary>
+    public List<FilterProfile> Profiles { get; set; } = FilterProfile.CreateDefaults();
 
     [JsonIgnore]
     public static string DefaultPath { get; } = Path.Combine(
@@ -36,25 +28,20 @@ public sealed class AppConfiguration
         "ChatterFix",
         "config.json");
 
-    public FilterSettings ToFilterSettings()
+    /// <summary>Picks the profile for the given foreground process, falling back when nothing matches.</summary>
+    public FilterProfile ResolveProfile(string? processName)
     {
-        var buttons = new ButtonFilterSettings[ClickStatistics.ButtonCount];
-        for (int i = 0; i < buttons.Length; i++)
+        foreach (var profile in Profiles)
         {
-            buttons[i] = new ButtonFilterSettings
-            {
-                Enabled = i < ButtonsEnabled.Length && ButtonsEnabled[i],
-                ChatterThresholdMs = ChatterThresholdMs,
-                ReleaseDelayMs = ReleaseDelayMs,
-            };
+            if (profile.Matches(processName)) return profile;
         }
 
-        return new FilterSettings
+        foreach (var profile in Profiles)
         {
-            Mode = FilterMode.Protect,
-            Enabled = Enabled,
-            Buttons = buttons,
-        };
+            if (profile.IsFallback) return profile;
+        }
+
+        return Profiles.Count > 0 ? Profiles[0] : new FilterProfile();
     }
 
     /// <summary>
@@ -90,21 +77,22 @@ public sealed class AppConfiguration
     }
 
     /// <summary>
-    /// Clamps hand-edited values into a range that cannot break clicking.
-    /// A threshold of, say, 300 ms would swallow ordinary double clicks.
+    /// Repairs hand-edited values. Thresholds are clamped into a range that cannot
+    /// break clicking, and a config with no fallback profile gets one, otherwise
+    /// every application outside the named ones would go unfiltered.
     /// </summary>
     public AppConfiguration Sanitised()
     {
-        ChatterThresholdMs = Math.Clamp(ChatterThresholdMs, 1, 100);
-        ReleaseDelayMs = Math.Clamp(ReleaseDelayMs, 0, 50);
-
-        if (ButtonsEnabled.Length != ClickStatistics.ButtonCount)
+        if (Profiles.Count == 0)
         {
-            var fixedButtons = new bool[ClickStatistics.ButtonCount];
-            for (int i = 0; i < fixedButtons.Length; i++)
-                fixedButtons[i] = i < ButtonsEnabled.Length ? ButtonsEnabled[i] : true;
-            ButtonsEnabled = fixedButtons;
+            Profiles = FilterProfile.CreateDefaults();
+            return this;
         }
+
+        foreach (var profile in Profiles) profile.Sanitised();
+
+        bool hasFallback = Profiles.Exists(p => p.IsFallback);
+        if (!hasFallback) Profiles.Add(new FilterProfile { Name = "Desktop", ProcessNames = [] });
 
         return this;
     }
