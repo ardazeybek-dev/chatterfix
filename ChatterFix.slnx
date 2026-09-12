@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ChatterFix.Cli/ChatterFix.Cli.csproj" />
+    <Project Path="src/ChatterFix.Core/ChatterFix.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ChatterFix.Tests/ChatterFix.Tests.csproj" />
+  </Folder>
+</Solution>
