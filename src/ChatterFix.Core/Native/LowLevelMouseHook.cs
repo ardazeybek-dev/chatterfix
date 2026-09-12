@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace ChatterFix.Core.Native;
@@ -11,12 +10,9 @@ namespace ChatterFix.Core.Native;
 /// </summary>
 public sealed class LowLevelMouseHook : IDisposable
 {
-    private static readonly double TicksToMicroseconds = 1_000_000.0 / Stopwatch.Frequency;
-
     private readonly NativeMethods.LowLevelMouseProc _proc;
     private readonly IMouseEventSink _sink;
     private readonly ManualResetEventSlim _started = new(false);
-    private readonly long _epochTicks = Stopwatch.GetTimestamp();
 
     private IntPtr _hookHandle;
     private Thread? _thread;
@@ -42,8 +38,8 @@ public sealed class LowLevelMouseHook : IDisposable
 
     public bool IsRunning => _hookHandle != IntPtr.Zero && !_disposed;
 
-    /// <summary>Microseconds elapsed since the hook was created.</summary>
-    public long NowMicroseconds() => (long)((Stopwatch.GetTimestamp() - _epochTicks) * TicksToMicroseconds);
+    /// <summary>The shared process clock, in microseconds.</summary>
+    public static long NowMicroseconds() => MonotonicClock.NowMicroseconds();
 
     public void Start()
     {
