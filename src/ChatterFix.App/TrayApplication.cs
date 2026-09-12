@@ -1,5 +1,6 @@
 using ChatterFix.Core;
 using ChatterFix.Core.Configuration;
+using ChatterFix.Core.Diagnostics;
 using ChatterFix.Core.Filtering;
 using ChatterFix.Core.Native;
 
@@ -10,8 +11,11 @@ namespace ChatterFix.App;
 /// There is no main window: the application is meant to be forgotten about,
 /// so everything happens through the tray icon and its menu.
 /// </summary>
-internal sealed class TrayApplication : IDisposable
+internal sealed class TrayApplication : IDisposable, IStatisticsSession
 {
+    /// <summary>Counters are written to disk this often, so a power cut costs at most a minute.</summary>
+    private const int SaveEveryTicks = 60;
+
     private readonly NotifyIcon _notifyIcon = new();
     private readonly ContextMenuStrip _menu = new();
     private readonly ToolStripMenuItem _statusItem = new() { Enabled = false };
@@ -23,8 +27,12 @@ internal sealed class TrayApplication : IDisposable
     private readonly Icon _activeIcon = TrayIcons.Create(active: true);
     private readonly Icon _pausedIcon = TrayIcons.Create(active: false);
 
+    private readonly ClickStatistics _statistics = new();
+
     private AppConfiguration _config = new();
     private FilterProfile _activeProfile = new();
+    private DateTimeOffset _recordingSince = DateTimeOffset.Now;
+    private int _ticksSinceSave;
     private ClickFilter? _filter;
     private ReleaseScheduler? _scheduler;
     private LowLevelMouseHook? _hook;
@@ -38,6 +46,9 @@ internal sealed class TrayApplication : IDisposable
     {
         _config = AppConfiguration.Load();
         _activeProfile = _config.ResolveProfile(null);
+
+        // A failing switch shows itself over days, so counters carry across restarts.
+        _recordingSince = StatisticsStore.Load(_statistics);
 
         if (!StartEngine()) return false;
 
@@ -60,7 +71,10 @@ internal sealed class TrayApplication : IDisposable
             MonotonicClock.NowMicroseconds,
             button => InputInjector.SendButton(button, MouseEventKind.Up));
 
-        _filter = new ClickFilter(_activeProfile.ToFilterSettings(_config.Enabled), releaseGate: _scheduler);
+        _filter = new ClickFilter(
+            _activeProfile.ToFilterSettings(_config.Enabled),
+            _statistics,
+            releaseGate: _scheduler);
         _hook = new LowLevelMouseHook(_filter);
 
         try
@@ -188,7 +202,7 @@ internal sealed class TrayApplication : IDisposable
 
         if (_statisticsForm is null || _statisticsForm.IsDisposed)
         {
-            _statisticsForm = new StatisticsForm(_filter);
+            _statisticsForm = new StatisticsForm(this);
             _statisticsForm.Show();
         }
         else
@@ -200,9 +214,26 @@ internal sealed class TrayApplication : IDisposable
         }
     }
 
+    public ClickFilter Filter => _filter!;
+
+    public DateTimeOffset RecordingSince => _recordingSince;
+
+    public void ResetCounters()
+    {
+        _statistics.Reset();
+        _recordingSince = DateTimeOffset.Now;
+        StatisticsStore.Delete();
+    }
+
     private void RefreshStatus()
     {
         if (_filter is null) return;
+
+        if (++_ticksSinceSave >= SaveEveryTicks)
+        {
+            _ticksSinceSave = 0;
+            StatisticsStore.TrySave(_statistics, _recordingSince);
+        }
 
         bool enabled = _config.Enabled;
         var profile = _activeProfile;
@@ -244,6 +275,8 @@ internal sealed class TrayApplication : IDisposable
         _menu.Dispose();
 
         _watcher?.Dispose();
+
+        StatisticsStore.TrySave(_statistics, _recordingSince);
 
         // Stop filtering first, then flush: a release still held back would otherwise
         // leave the button pressed for every application on the system.
