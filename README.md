@@ -1,0 +1,163 @@
+# ChatterFix
+
+[![CI](https://github.com/ardazeybek-dev/chatterfix/actions/workflows/ci.yml/badge.svg)](https://github.com/ardazeybek-dev/chatterfix/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078D4.svg)](#requirements)
+
+A worn mouse switch bounces as its contacts meet, so one physical click reaches
+Windows as two. ChatterFix sits between the mouse and every application, measures
+the interval between a release and the next press, and drops the events no hand
+could have produced.
+
+It never generates a click of its own. It only removes events the hardware should
+not have sent.
+
+## The two faults it repairs
+
+**Chatter — one click arrives as two.** The second press lands a few milliseconds
+after the release, far faster than a finger can move. ChatterFix swallows it, and
+swallows its matching release as well: an application that receives a release with
+no press treats the button as stuck down.
+
+**Drop — a held button lets go by itself.** The same worn contact can break while
+the button is still held, which Windows reports as a release immediately followed
+by a press. ChatterFix holds every release back for a few milliseconds. If a press
+arrives inside that window the contact merely bounced, so both events are dropped
+and the hold continues unbroken. Otherwise the release is sent on.
+
+## How it decides
+
+The rule is a speed limit no human hand can reach:
+
+| What | Gap between release and next press |
+|---|---|
+| Ordinary clicking | 150–400 ms |
+| Deliberate double click | 80–200 ms |
+| Jitter clicking (~13 per second) | ~75 ms |
+| Fast clicking (~30 per second) | ~15 ms |
+| **Chatter (hardware fault)** | **1–25 ms** |
+
+The measurement is taken from the **release**, not from the previous press. A press
+that follows a two-second hold is seconds away from the last press, so a
+press-to-press comparison would miss a fault there entirely.
+
+## Profiles
+
+One threshold cannot serve every situation. On the desktop nobody clicks twice
+within 40 ms, so a wide threshold is free of risk. In a game the same hand may
+reach thirty clicks a second, where 40 ms would start eating real clicks.
+
+So thresholds follow whichever application has focus:
+
+| Profile | Applies to | Threshold | Drop repair |
+|---|---|---|---|
+| Desktop | everything not listed elsewhere | 40 ms | 12 ms |
+| Fast clicking | `javaw`, `java`, `Minecraft`, `LunarClient`, … | 12 ms | 8 ms |
+
+Profiles are editable in **Settings**; the one with no process names is the
+fallback and cannot be removed.
+
+## Requirements
+
+- Windows 10 or 11
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) to build
+
+## Install
+
+```bash
+git clone https://github.com/ardazeybek-dev/chatterfix.git
+cd chatterfix
+dotnet build -c Release
+```
+
+Run the tray application:
+
+```bash
+dotnet run --project src/ChatterFix.App -c Release
+```
+
+Or publish a standalone folder and run `ChatterFix.exe` from it:
+
+```bash
+dotnet publish src/ChatterFix.App -c Release -o publish/app
+```
+
+The icon appears in the notification area: green while protecting, grey while
+paused. Double-click it for live statistics, right-click for settings and for
+**Start with Windows**.
+
+## Measure before you trust a threshold
+
+The command-line tool blocks nothing by default. It listens, and reports what your
+mouse is actually doing:
+
+```bash
+# Watch live, blocking nothing
+dotnet run --project src/ChatterFix.Cli
+
+# Measure for ten minutes and write a report
+dotnet run --project src/ChatterFix.Cli -- --quiet --seconds 600 --report report.json
+
+# Prove the hook is installed and can block events
+dotnet run --project src/ChatterFix.Cli -- --selftest
+```
+
+A healthy mouse produces nothing below 30 ms. A faulty one shows a cluster down in
+the single digits, separated from real clicks by an empty band — and that empty
+band is where the threshold belongs.
+
+## Configuration
+
+Settings live in `%APPDATA%\ChatterFix\config.json`. The file can be edited by
+hand; values outside a usable range are clamped on load, and a file that cannot be
+parsed falls back to defaults rather than leaving the mouse unprotected.
+
+## Project layout
+
+```
+src/
+  ChatterFix.Core/          Filtering engine, no UI and no Win32 above the Native folder
+    Filtering/              ClickFilter: the decision logic, testable without a mouse
+    Native/                 Low-level hook, input injection, release scheduler
+    Diagnostics/            Histograms, counters, event ring buffer
+    Configuration/          Profiles, persistence, startup registration
+  ChatterFix.App/           Tray application (WinForms)
+  ChatterFix.Cli/           Diagnostics and measurement tool
+tests/
+  ChatterFix.Tests/         40 tests, including a 20,000-step balance invariant
+```
+
+## Pitfalls
+
+Things that cost real debugging time here, and will cost it again in any project
+that hooks Windows input:
+
+1. **A swallowed press must take its release with it.** Drop only the press and the
+   application sees a release with no press, and the button sticks down. The filter
+   tracks this per button and a 20,000-step test asserts the balance never breaks.
+2. **Measure from the release, not from the previous press.** Press-to-press looks
+   correct until someone holds a button for two seconds; the fault that follows is
+   seconds away from the last press and sails straight through.
+3. **Keep the hook callback empty.** Windows silently removes a low-level hook whose
+   callback takes longer than 300 ms, and the mouse then works with no sign of what
+   happened. Anything expensive — resolving a window to a process name, for
+   instance — belongs on another thread.
+4. **Hold the hook delegate in a field.** Passing a lambda straight to
+   `SetWindowsHookEx` lets the garbage collector reclaim it, and Windows then jumps
+   into freed memory at the next click.
+5. **Do not click fast on purpose while measuring.** Deliberate fast clicking lands
+   in the same interval range as chatter, so the measurement shows a fault that is
+   really your own finger. Measure during ordinary use.
+
+## A note on what this can and cannot do
+
+This is a software repair for a mechanical failure. The switch does not get better,
+and as it wears the faulty intervals creep upwards towards real clicking speed. The
+statistics window is there to show that happening: when the histogram stops having
+an empty band between faults and real clicks, no threshold can separate them any
+more, and the switch needs replacing.
+
+## License
+
+[MIT](LICENSE) © Seyid Arda Zeybek
