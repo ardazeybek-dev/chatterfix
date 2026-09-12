@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/ChatterFix.App/ChatterFix.App.csproj" />
     <Project Path="src/ChatterFix.Cli/ChatterFix.Cli.csproj" />
     <Project Path="src/ChatterFix.Core/ChatterFix.Core.csproj" />
   </Folder>
