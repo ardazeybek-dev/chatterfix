@@ -24,7 +24,10 @@ no press treats the button as stuck down.
 the button is still held, which Windows reports as a release immediately followed
 by a press. ChatterFix holds every release back for a few milliseconds. If a press
 arrives inside that window the contact merely bounced, so both events are dropped
-and the hold continues unbroken. Otherwise the release is sent on.
+and the hold continues unbroken. Otherwise the release is sent on. A drop that
+outlasts the window looks like chatter when the contact returns, so that press is
+swallowed at first — but if it is still held 30 ms later it was the hold resuming,
+not a bounce, and ChatterFix sends it after all.
 
 ## How it decides
 
@@ -139,9 +142,11 @@ tests/
 Things that cost real debugging time here, and will cost it again in any project
 that hooks Windows input:
 
-1. **A swallowed press must take its release with it.** Drop only the press and the
-   application sees a release with no press, and the button sticks down. The filter
-   tracks this per button and a 20,000-step test asserts the balance never breaks.
+1. **A swallowed press must take its release with it — unless it is still held.**
+   Drop only the press and the application sees a release with no press, and the
+   button sticks down. Swallow a press that stays held and a hold ends mid-drag with
+   the finger still down. The filter tracks both per button and a 20,000-step test
+   asserts the balance never breaks.
 2. **Measure from the release, not from the previous press.** Press-to-press looks
    correct until someone holds a button for two seconds; the fault that follows is
    seconds away from the last press and sails straight through.

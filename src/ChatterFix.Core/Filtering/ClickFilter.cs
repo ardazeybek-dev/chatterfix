@@ -13,6 +13,13 @@ namespace ChatterFix.Core.Filtering;
 /// </summary>
 public sealed class ClickFilter : IMouseEventSink
 {
+    /// <summary>
+    /// A swallowed press still held after this long was not chatter: bounce pulses last
+    /// a few milliseconds, so this is the contact returning mid-hold, and the press is
+    /// sent after all. Without it a drop just past the release window ends the hold.
+    /// </summary>
+    internal const long HoldRestoreUs = 30_000;
+
     private readonly ClickStatistics _statistics;
     private readonly EventRing _events;
     private readonly ButtonState[] _states;
@@ -54,6 +61,7 @@ public sealed class ClickFilter : IMouseEventSink
             _states[i].LastUpUs = -1;
             _states[i].SuppressedDownPending = false;
             _states[i].ReleasePending = false;
+            _states[i].PressRestorePending = false;
         }
     }
 
@@ -119,8 +127,14 @@ public sealed class ClickFilter : IMouseEventSink
 
         if (isChatter)
         {
-            // This press is swallowed, so its release must be swallowed as well.
+            // This press is swallowed, so its release must be swallowed as well —
+            // unless it is still held once the restore window runs out.
             state.SuppressedDownPending = true;
+            state.PressRestorePending =
+                _releaseGate is not null
+                && _releaseGate.HoldPress(e.Button, e.TimestampUs + HoldRestoreUs);
+            if (state.PressRestorePending) state.LastDownUs = e.TimestampUs;
+
             buttonStats.AddChatter();
             return new FilterResult(FilterAction.Suppress, FilterReason.ChatterDown, releaseGapUs);
         }
@@ -135,6 +149,12 @@ public sealed class ClickFilter : IMouseEventSink
         {
             state.SuppressedDownPending = false;
 
+            bool pressRestored = state.PressRestorePending && !_releaseGate!.Cancel(e.Button);
+            state.PressRestorePending = false;
+
+            // The press went out after all, so this release belongs to it and is handled normally.
+            if (pressRestored) return HandleRelease(ref state, in e, settings);
+
             // The physical release did happen, so the next chatter check measures from here.
             state.LastUpUs = e.TimestampUs;
 
@@ -142,6 +162,11 @@ public sealed class ClickFilter : IMouseEventSink
             return new FilterResult(FilterAction.Suppress, FilterReason.OrphanUp, -1);
         }
 
+        return HandleRelease(ref state, in e, settings);
+    }
+
+    private FilterResult HandleRelease(ref ButtonState state, in MouseEvent e, FilterSettings settings)
+    {
         long pressDurationUs = state.LastDownUs >= 0 ? e.TimestampUs - state.LastDownUs : -1;
 
         _statistics[e.Button].AddUp(pressDurationUs);
@@ -178,5 +203,8 @@ public sealed class ClickFilter : IMouseEventSink
 
         /// <summary>A release is being held back, waiting to see whether the button was really let go.</summary>
         public bool ReleasePending;
+
+        /// <summary>A swallowed press is scheduled to be sent if the button is still held.</summary>
+        public bool PressRestorePending;
     }
 }

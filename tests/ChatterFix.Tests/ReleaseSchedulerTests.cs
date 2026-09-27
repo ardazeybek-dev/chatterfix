@@ -52,6 +52,37 @@ public class ReleaseSchedulerTests
     }
 
     [Fact]
+    public void AScheduledPress_IsSentOnTheSameButtonAndNotAsARelease()
+    {
+        var releases = new Recorder();
+        var presses = new Recorder();
+        using var scheduler = new ReleaseScheduler(MonotonicClock.NowMicroseconds, releases.Record, presses.Record);
+
+        Assert.True(scheduler.HoldPress(MouseButton.Right, MonotonicClock.NowMicroseconds() + 10_000));
+        Thread.Sleep(150);
+
+        Assert.Empty(releases.Snapshot());
+        Assert.Equal(MouseButton.Right, Assert.Single(presses.Snapshot()).Button);
+    }
+
+    [Fact]
+    public void WithoutAPressSender_NothingIsScheduled_AndShutdownNeverSendsAPress()
+    {
+        var recorder = new Recorder();
+        var noPresses = new ReleaseScheduler(MonotonicClock.NowMicroseconds, recorder.Record);
+        Assert.False(noPresses.HoldPress(MouseButton.Left, 1));
+        noPresses.Dispose();
+
+        var presses = new Recorder();
+        var scheduler = new ReleaseScheduler(MonotonicClock.NowMicroseconds, recorder.Record, presses.Record);
+        scheduler.HoldPress(MouseButton.Left, MonotonicClock.NowMicroseconds() + 10_000_000);
+        scheduler.Dispose();
+
+        // A press sent on the way out would leave the button stuck down.
+        Assert.Empty(presses.Snapshot());
+    }
+
+    [Fact]
     public void ACancelledRelease_IsNeverSent()
     {
         var recorder = new Recorder();

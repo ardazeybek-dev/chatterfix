@@ -15,12 +15,23 @@ public interface IReleaseGate
     void Hold(MouseButton button, long deadlineUs);
 
     /// <summary>
-    /// Cancels a held release. Returns true when the release was still pending and is
-    /// now cancelled; false when it had already been sent, in which case the caller
-    /// must treat the button as released.
+    /// Schedules a press to be sent at <paramref name="deadlineUs"/>, unless cancelled first.
+    /// Used when a press judged as chatter turns out to be held: the contact came back
+    /// mid-hold, and without the press the hold would stay broken. Returns false when
+    /// the gate cannot send presses, in which case nothing was scheduled.
+    /// </summary>
+    bool HoldPress(MouseButton button, long deadlineUs);
+
+    /// <summary>
+    /// Cancels a held release or a scheduled press. Returns true when it was still
+    /// pending and is now cancelled; false when it had already been sent, in which
+    /// case the caller must treat it as having reached the system.
     /// </summary>
     bool Cancel(MouseButton button);
 
-    /// <summary>Sends every pending release immediately. Called on shutdown so nothing stays stuck.</summary>
+    /// <summary>
+    /// Sends every pending release immediately and drops scheduled presses.
+    /// Called on shutdown so nothing stays stuck.
+    /// </summary>
     void FlushAll();
 }
