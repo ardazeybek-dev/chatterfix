@@ -69,7 +69,8 @@ internal sealed class TrayApplication : IDisposable, IStatisticsSession
     {
         _scheduler = new ReleaseScheduler(
             MonotonicClock.NowMicroseconds,
-            button => InputInjector.SendButton(button, MouseEventKind.Up));
+            button => InputInjector.SendButton(button, MouseEventKind.Up),
+            button => InputInjector.SendButton(button, MouseEventKind.Down));
 
         _filter = new ClickFilter(
             _activeProfile.ToFilterSettings(_config.Enabled),

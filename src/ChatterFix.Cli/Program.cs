@@ -52,7 +52,10 @@ internal static class Program
 
         // Disposed after the hook, so any release still held back is sent on the way out.
         using var releaseGate = protect && releaseDelay > 0
-            ? new ReleaseScheduler(MonotonicClock.NowMicroseconds, b => InputInjector.SendButton(b, MouseEventKind.Up))
+            ? new ReleaseScheduler(
+                MonotonicClock.NowMicroseconds,
+                b => InputInjector.SendButton(b, MouseEventKind.Up),
+                b => InputInjector.SendButton(b, MouseEventKind.Down))
             : null;
 
         var filter = new ClickFilter(settings, releaseGate: releaseGate);

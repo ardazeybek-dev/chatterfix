@@ -16,26 +16,52 @@ public class ReleaseHoldTests
     private sealed class FakeReleaseGate : IReleaseGate
     {
         private readonly Dictionary<MouseButton, long> _pending = [];
+        private readonly Dictionary<MouseButton, long> _pendingPresses = [];
 
+        /// <summary>Releases sent to the system.</summary>
         public List<MouseButton> Sent { get; } = [];
+
+        /// <summary>Presses sent to the system.</summary>
+        public List<MouseButton> SentPresses { get; } = [];
+
+        /// <summary>Everything sent, in order.</summary>
+        public List<MouseEventKind> Log { get; } = [];
+
         public int FlushCount { get; private set; }
 
         public void Hold(MouseButton button, long deadlineUs) => _pending[button] = deadlineUs;
 
-        public bool Cancel(MouseButton button) => _pending.Remove(button);
+        public bool HoldPress(MouseButton button, long deadlineUs)
+        {
+            _pendingPresses[button] = deadlineUs;
+            return true;
+        }
+
+        public bool Cancel(MouseButton button) => _pending.Remove(button) | _pendingPresses.Remove(button);
 
         public void FlushAll()
         {
             FlushCount++;
+            _pendingPresses.Clear();
             foreach (var button in _pending.Keys.ToList()) Send(button);
         }
 
-        /// <summary>Sends every release whose window has expired by <paramref name="nowUs"/>.</summary>
+        /// <summary>Sends every event whose window has expired by <paramref name="nowUs"/>.</summary>
         public void Advance(long nowUs)
         {
             foreach (var (button, deadline) in _pending.ToList())
             {
                 if (deadline <= nowUs) Send(button);
+            }
+
+            foreach (var (button, deadline) in _pendingPresses.ToList())
+            {
+                if (deadline <= nowUs)
+                {
+                    _pendingPresses.Remove(button);
+                    SentPresses.Add(button);
+                    Log.Add(MouseEventKind.Down);
+                }
             }
         }
 
@@ -43,6 +69,7 @@ public class ReleaseHoldTests
         {
             _pending.Remove(button);
             Sent.Add(button);
+            Log.Add(MouseEventKind.Up);
         }
 
         public bool IsPending(MouseButton button) => _pending.ContainsKey(button);
@@ -157,6 +184,48 @@ public class ReleaseHoldTests
     }
 
     [Fact]
+    public void AChatterPressStillHeld_IsSentAfterAllAndTheHoldResumes()
+    {
+        var (filter, gate) = CreateFilter();
+
+        filter.Handle(Down(0));
+        filter.Handle(Up(40));            // contact drops mid-hold
+        gate.Advance(52_000);             // longer than the window, so the release went out
+
+        // The contact returns 13 ms after the drop: judged as chatter and swallowed...
+        Assert.Equal(FilterReason.ChatterDown, filter.Handle(Down(53)).Reason);
+        Assert.Empty(gate.SentPresses);
+
+        // ...but the finger is still down 30 ms later, so this is a hold, not a bounce.
+        gate.Advance(83_000);
+        Assert.Single(gate.SentPresses);
+
+        // The real release now belongs to the restored press and is handled normally.
+        var result = filter.Handle(Up(500));
+        Assert.Equal(FilterAction.Defer, result.Action);
+        Assert.Equal(0, filter.Statistics[MouseButton.Left].OrphanSuppressed);
+
+        gate.Advance(512_000);
+        Assert.Equal([MouseEventKind.Up, MouseEventKind.Down, MouseEventKind.Up], gate.Log);
+    }
+
+    [Fact]
+    public void AShortChatterPress_IsNeverRestored()
+    {
+        var (filter, gate) = CreateFilter();
+
+        filter.Handle(Down(0));
+        filter.Handle(Up(40));
+        gate.Advance(52_000);
+
+        filter.Handle(Down(53));                                  // bounce
+        Assert.Equal(FilterReason.OrphanUp, filter.Handle(Up(58)).Reason);
+
+        gate.Advance(1_000_000);
+        Assert.Empty(gate.SentPresses);
+    }
+
+    [Fact]
     public void WithTheDelaySetToZero_ReleasesPassStraightThrough()
     {
         var (filter, gate) = CreateFilter(releaseDelayMs: 0);
@@ -195,10 +264,18 @@ public class ReleaseHoldTests
         void DrainGate(double nowMs)
         {
             gate.Advance((long)(nowMs * 1000));
-            while (sentAlready < gate.Sent.Count)
+            while (sentAlready < gate.Log.Count)
             {
-                Assert.True(systemSeesButtonDown, "a held release was sent while the system saw no press");
-                systemSeesButtonDown = false;
+                if (gate.Log[sentAlready] == MouseEventKind.Up)
+                {
+                    Assert.True(systemSeesButtonDown, "a held release was sent while the system saw no press");
+                    systemSeesButtonDown = false;
+                }
+                else
+                {
+                    Assert.False(systemSeesButtonDown, "a restored press was sent while the system saw a press");
+                    systemSeesButtonDown = true;
+                }
                 sentAlready++;
             }
         }
@@ -228,7 +305,7 @@ public class ReleaseHoldTests
 
         // Whatever is still held back must be flushed on shutdown, leaving nothing pressed.
         gate.FlushAll();
-        while (sentAlready < gate.Sent.Count)
+        while (sentAlready < gate.Log.Count)
         {
             systemSeesButtonDown = false;
             sentAlready++;
