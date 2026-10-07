@@ -38,6 +38,7 @@ internal static class Program
         int seconds = ReadIntOption(args, "--seconds", 0);
         bool quiet = args.Contains("--quiet");
         string? reportPath = ReadStringOption(args, "--report");
+        string? eventsPath = ReadStringOption(args, "--events");
 
         var settings = new FilterSettings
         {
@@ -58,7 +59,9 @@ internal static class Program
                 b => InputInjector.SendButton(b, MouseEventKind.Down))
             : null;
 
-        var filter = new ClickFilter(settings, releaseGate: releaseGate);
+        // An event log keeps every event of the run, not just the last few hundred.
+        var events = eventsPath is not null ? new EventRing(500_000) : null;
+        var filter = new ClickFilter(settings, events: events, releaseGate: releaseGate);
         using var hook = new LowLevelMouseHook(filter);
 
         try
@@ -117,7 +120,39 @@ internal static class Program
             }
         }
 
+        if (eventsPath is not null)
+        {
+            try
+            {
+                WriteEvents(eventsPath, filter.Events);
+                Console.WriteLine($"  Events written to {Path.GetFullPath(eventsPath)}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  Could not write the events: {ex.Message}");
+            }
+        }
+
         return 0;
+    }
+
+    /// <summary>
+    /// Writes every event oldest first as CSV. For a press the gap is the time since the
+    /// last release; for a release it is how long the button was held.
+    /// </summary>
+    private static void WriteEvents(string path, EventRing events)
+    {
+        var entries = events.TakeLatest(events.Capacity);
+        var csv = new StringBuilder("timeMs,button,kind,action,reason,gapMs\n");
+
+        for (int i = entries.Length - 1; i >= 0; i--)
+        {
+            var e = entries[i];
+            csv.Append(CultureInfo.InvariantCulture,
+                $"{e.TimestampUs / 1000.0:F1},{e.Button},{e.Kind},{e.Action},{e.Reason},{e.GapMs:F1}\n");
+        }
+
+        File.WriteAllText(path, csv.ToString());
     }
 
     /// <summary>
@@ -468,6 +503,7 @@ internal static class Program
         Console.WriteLine("  chatterfix-diag --seconds 60      Measure for 60 seconds, then exit");
         Console.WriteLine("  chatterfix-diag --quiet           Skip the live table, print progress only");
         Console.WriteLine("  chatterfix-diag --report r.json   Save the measurement as JSON");
+        Console.WriteLine("  chatterfix-diag --events e.csv    Save every click event as CSV");
         Console.WriteLine("  chatterfix-diag --selftest        Verify the hook works, then exit");
     }
 }
