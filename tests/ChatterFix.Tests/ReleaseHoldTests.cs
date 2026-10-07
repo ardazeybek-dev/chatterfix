@@ -1,4 +1,5 @@
 using ChatterFix.Core;
+using ChatterFix.Core.Configuration;
 using ChatterFix.Core.Filtering;
 
 namespace ChatterFix.Tests;
@@ -312,5 +313,69 @@ public class ReleaseHoldTests
         }
 
         Assert.False(systemSeesButtonDown, "the button was left pressed at the end of the sequence");
+    }
+
+    // The sequences below are taken from a recording of a worn left switch.
+
+    private static (ClickFilter filter, FakeReleaseGate gate) CreateDesktopFilter()
+    {
+        var desktop = FilterProfile.CreateDefaults().Single(p => p.IsFallback);
+        var gate = new FakeReleaseGate();
+        return (new ClickFilter(desktop.ToFilterSettings(enabled: true), releaseGate: gate), gate);
+    }
+
+    private static FilterAction Replay(ClickFilter filter, FakeReleaseGate gate, MouseEvent e)
+    {
+        gate.Advance(e.TimestampUs);
+        return filter.Handle(in e).Action;
+    }
+
+    [Fact]
+    public void ADragWithTheContactBreakingTwice_ReachesTheSystemAsOneHold()
+    {
+        var (filter, gate) = CreateDesktopFilter();
+
+        // Held for almost a second; the contact broke for 18 ms and then for 24 ms.
+        Assert.Equal(FilterAction.Pass, Replay(filter, gate, Down(0)));
+        Assert.Equal(FilterAction.Defer, Replay(filter, gate, Up(55)));
+        Assert.Equal(FilterAction.Suppress, Replay(filter, gate, Down(73)));
+        Assert.Equal(FilterAction.Defer, Replay(filter, gate, Up(911.3)));
+        Assert.Equal(FilterAction.Suppress, Replay(filter, gate, Down(935.3)));
+        Assert.Equal(FilterAction.Defer, Replay(filter, gate, Up(990.9)));
+        gate.Advance(2_000_000);
+
+        Assert.Equal([MouseEventKind.Up], gate.Log);
+        Assert.Empty(gate.SentPresses);
+    }
+
+    [Fact]
+    public void APhantomClickAfterAClick_IsFoldedIntoIt()
+    {
+        var (filter, gate) = CreateDesktopFilter();
+
+        // A 15 ms click, then a second pulse 31.8 ms later that no hand produced.
+        Replay(filter, gate, Down(0));
+        Replay(filter, gate, Up(15.2));
+        Assert.Equal(FilterAction.Suppress, Replay(filter, gate, Down(47)));
+        Replay(filter, gate, Up(63.3));
+        gate.Advance(2_000_000);
+
+        // One press reached the system, and exactly one release.
+        Assert.Equal([MouseEventKind.Up], gate.Log);
+    }
+
+    [Fact]
+    public void AFastDeliberateDoubleClick_StillArrivesAsTwoClicks()
+    {
+        var (filter, gate) = CreateDesktopFilter();
+
+        // The fastest double click in the recording: 40 ms between release and press.
+        Assert.Equal(FilterAction.Pass, Replay(filter, gate, Down(0)));
+        Replay(filter, gate, Up(79.4));
+        Assert.Equal(FilterAction.Pass, Replay(filter, gate, Down(119.8)));
+        Replay(filter, gate, Up(151.8));
+        gate.Advance(2_000_000);
+
+        Assert.Equal([MouseEventKind.Up, MouseEventKind.Up], gate.Log);
     }
 }

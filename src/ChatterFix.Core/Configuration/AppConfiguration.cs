@@ -10,6 +10,14 @@ namespace ChatterFix.Core.Configuration;
 /// </summary>
 public sealed class AppConfiguration
 {
+    /// <summary>
+    /// The layout version the file was written with. Files written before versioning
+    /// read as 0 and are migrated on load.
+    /// </summary>
+    public int Version { get; set; }
+
+    public const int CurrentVersion = 2;
+
     /// <summary>Master switch. When off the hook stays installed but blocks nothing.</summary>
     public bool Enabled { get; set; } = true;
 
@@ -86,10 +94,25 @@ public sealed class AppConfiguration
         if (Profiles.Count == 0)
         {
             Profiles = FilterProfile.CreateDefaults();
+            Version = CurrentVersion;
             return this;
         }
 
         foreach (var profile in Profiles) profile.Sanitised();
+
+        if (Version < 2)
+        {
+            // Version 1 held releases for 12 ms on the desktop, so a break in the contact
+            // lasting longer ended the hold and its press was swallowed: drags fell apart.
+            // The window now spans the threshold, which turns every such break into a repair.
+            foreach (var profile in Profiles)
+            {
+                if (profile.IsFallback && profile.ReleaseDelayMs < profile.ChatterThresholdMs)
+                    profile.ReleaseDelayMs = Math.Min(profile.ChatterThresholdMs, 50);
+            }
+        }
+
+        Version = CurrentVersion;
 
         bool hasFallback = Profiles.Exists(p => p.IsFallback);
         if (!hasFallback) Profiles.Add(new FilterProfile { Name = "Desktop", ProcessNames = [] });

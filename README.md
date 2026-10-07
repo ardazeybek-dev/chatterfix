@@ -22,9 +22,11 @@ no press treats the button as stuck down.
 
 **Drop — a held button lets go by itself.** The same worn contact can break while
 the button is still held, which Windows reports as a release immediately followed
-by a press. ChatterFix holds every release back for a few milliseconds. If a press
-arrives inside that window the contact merely bounced, so both events are dropped
-and the hold continues unbroken. Otherwise the release is sent on. A drop that
+by a press. Measured on a worn switch, these breaks last 15–30 ms. ChatterFix holds
+every release back for as long as the chatter threshold. If a press arrives inside
+that window the contact merely broke, so both events are dropped and the hold
+continues unbroken — a drag survives, and a phantom click right after a real one is
+folded into it. Otherwise the release is sent on. A drop that
 outlasts the window looks like chatter when the contact returns, so that press is
 swallowed at first — but if it is still held 30 ms later it was the hold resuming,
 not a bounce, and ChatterFix sends it after all.
@@ -48,14 +50,14 @@ press-to-press comparison would miss a fault there entirely.
 ## Profiles
 
 One threshold cannot serve every situation. On the desktop nobody clicks twice
-within 40 ms, so a wide threshold is free of risk. In a game the same hand may
-reach thirty clicks a second, where 40 ms would start eating real clicks.
+within 35 ms, so a wide threshold is free of risk. In a game the same hand may
+reach thirty clicks a second, where 35 ms would start eating real clicks.
 
 So thresholds follow whichever application has focus:
 
 | Profile | Applies to | Threshold | Drop repair |
 |---|---|---|---|
-| Desktop | everything not listed elsewhere | 40 ms | 12 ms |
+| Desktop | everything not listed elsewhere | 35 ms | 35 ms |
 | Fast clicking | `javaw`, `java`, `Minecraft`, `LunarClient`, … | 12 ms | 8 ms |
 
 Profiles are editable in **Settings**; the one with no process names is the
@@ -102,6 +104,9 @@ dotnet run --project src/ChatterFix.Cli
 # Measure for ten minutes and write a report
 dotnet run --project src/ChatterFix.Cli -- --quiet --seconds 600 --report report.json
 
+# Log every click event as CSV: press length and release-to-press gap
+dotnet run --project src/ChatterFix.Cli -- --quiet --seconds 300 --events events.csv
+
 # Prove the hook is installed and can block events
 dotnet run --project src/ChatterFix.Cli -- --selftest
 ```
@@ -134,7 +139,7 @@ src/
   ChatterFix.App/           Tray application (WinForms)
   ChatterFix.Cli/           Diagnostics and measurement tool
 tests/
-  ChatterFix.Tests/         46 tests, including a 20,000-step balance invariant
+  ChatterFix.Tests/         55 tests, including a 20,000-step balance invariant
 ```
 
 ## Pitfalls
@@ -142,11 +147,12 @@ tests/
 Things that cost real debugging time here, and will cost it again in any project
 that hooks Windows input:
 
-1. **A swallowed press must take its release with it — unless it is still held.**
-   Drop only the press and the application sees a release with no press, and the
-   button sticks down. Swallow a press that stays held and a hold ends mid-drag with
-   the finger still down. The filter tracks both per button and a 20,000-step test
-   asserts the balance never breaks.
+1. **Mend a break in a hold; do not swallow the press after it.** A worn contact
+   breaks for 15–30 ms mid-hold. If the release window is shorter than that, the
+   release goes out and the drag ends no matter what happens to the next press, so
+   the window has to span the whole chatter threshold. A press that is swallowed
+   must take its release with it, or the button sticks down; a 20,000-step test
+   asserts that balance.
 2. **Measure from the release, not from the previous press.** Press-to-press looks
    correct until someone holds a button for two seconds; the fault that follows is
    seconds away from the last press and sails straight through.

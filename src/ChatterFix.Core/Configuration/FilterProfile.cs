@@ -21,9 +21,9 @@ public sealed class FilterProfile
     /// </summary>
     public string[] ProcessNames { get; set; } = [];
 
-    public int ChatterThresholdMs { get; set; } = 40;
+    public int ChatterThresholdMs { get; set; } = 35;
 
-    public int ReleaseDelayMs { get; set; } = 12;
+    public int ReleaseDelayMs { get; set; } = 35;
 
     public bool[] ButtonsEnabled { get; set; } = [true, true, true, true, true];
 
@@ -87,10 +87,13 @@ public sealed class FilterProfile
         {
             Name = "Desktop",
             ProcessNames = [],
-            // Real double clicks sit above 80 ms, so 40 ms stays well clear of them
-            // while catching faults that a narrow threshold would let through.
-            ChatterThresholdMs = 40,
-            ReleaseDelayMs = 12,
+            // Real double clicks sit above 40 ms, while a worn contact breaks for
+            // 15-30 ms in the middle of a hold. The release window spans the whole
+            // threshold, so such a break is mended into one unbroken hold instead of
+            // the press being swallowed: a drag survives it, and a phantom click is
+            // folded into the click before it rather than reaching the application.
+            ChatterThresholdMs = 35,
+            ReleaseDelayMs = 35,
         },
         new()
         {
