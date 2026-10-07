@@ -20,6 +20,12 @@ public sealed class ClickFilter : IMouseEventSink
     /// </summary>
     internal const long HoldRestoreUs = 30_000;
 
+    /// <summary>
+    /// A press held this long is a hold, not a click: the first press of a double click
+    /// stays well under it. Its release gets the longer hold repair window.
+    /// </summary>
+    internal const long LongHoldUs = 150_000;
+
     private readonly ClickStatistics _statistics;
     private readonly EventRing _events;
     private readonly ButtonState[] _states;
@@ -174,19 +180,25 @@ public sealed class ClickFilter : IMouseEventSink
 
         var buttonSettings = settings.Buttons[(int)e.Button];
 
+        // A repaired break leaves LastDownUs at the start of the hold, so this measures
+        // the whole hold as the system saw it, not just the stretch since the last break.
+        long releaseDelayUs = pressDurationUs >= LongHoldUs
+            ? Math.Max(buttonSettings.ReleaseDelayUs, buttonSettings.HoldRepairUs)
+            : buttonSettings.ReleaseDelayUs;
+
         bool holdRelease =
             _releaseGate is not null
             && settings.Enabled
             && settings.Mode == FilterMode.Protect
             && buttonSettings.Enabled
-            && buttonSettings.ReleaseDelayUs > 0;
+            && releaseDelayUs > 0;
 
         if (holdRelease)
         {
             // Hold it briefly. If a press arrives inside the window the contact only
             // bounced; otherwise the scheduler sends this release on our behalf.
             state.ReleasePending = true;
-            _releaseGate!.Hold(e.Button, e.TimestampUs + buttonSettings.ReleaseDelayUs);
+            _releaseGate!.Hold(e.Button, e.TimestampUs + releaseDelayUs);
             return new FilterResult(FilterAction.Defer, FilterReason.ReleaseHeld, pressDurationUs);
         }
 

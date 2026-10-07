@@ -378,4 +378,42 @@ public class ReleaseHoldTests
 
         Assert.Equal([MouseEventKind.Up, MouseEventKind.Up], gate.Log);
     }
+
+    [Fact]
+    public void AHoldBrokenForUpTo160Ms_ReachesTheSystemAsOneHold()
+    {
+        var (filter, gate) = CreateDesktopFilter();
+
+        // A hold of over two seconds with breaks of 23.5, 24.1, 159.3 and 24.7 ms.
+        Assert.Equal(FilterAction.Pass, Replay(filter, gate, Down(0)));
+        Replay(filter, gate, Up(1384.5));
+        Assert.Equal(FilterAction.Suppress, Replay(filter, gate, Down(1408)));
+        Replay(filter, gate, Up(1616.1));
+        Assert.Equal(FilterAction.Suppress, Replay(filter, gate, Down(1640.2)));
+        Replay(filter, gate, Up(1696));
+        Assert.Equal(FilterAction.Suppress, Replay(filter, gate, Down(1855.3)));
+        Replay(filter, gate, Up(1887.4));
+        Assert.Equal(FilterAction.Suppress, Replay(filter, gate, Down(1912.1)));
+        Replay(filter, gate, Up(2151.4));
+        gate.Advance(5_000_000);
+
+        Assert.Equal([MouseEventKind.Up], gate.Log);
+        Assert.Equal(4, filter.Statistics[MouseButton.Left].ReleaseRepairs);
+    }
+
+    [Fact]
+    public void ADoubleClickStartingWithAShortPress_IsNotTakenForABrokenHold()
+    {
+        var (filter, gate) = CreateDesktopFilter();
+
+        // Measured double clicks start with presses of 15-105 ms and leave 70-90 ms
+        // before the second press: inside the hold repair window, but not after a hold.
+        Assert.Equal(FilterAction.Pass, Replay(filter, gate, Down(0)));
+        Replay(filter, gate, Up(104));
+        Assert.Equal(FilterAction.Pass, Replay(filter, gate, Down(175.7)));
+        Replay(filter, gate, Up(247.7));
+        gate.Advance(5_000_000);
+
+        Assert.Equal([MouseEventKind.Up, MouseEventKind.Up], gate.Log);
+    }
 }
