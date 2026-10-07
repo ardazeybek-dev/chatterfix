@@ -187,4 +187,46 @@ public class ConfigurationTests
         Assert.True(game.ChatterThresholdMs < 15, "the fast-clicking threshold would eat real clicks");
         Assert.True(desktop.ChatterThresholdMs > game.ChatterThresholdMs);
     }
+
+    [Fact]
+    public void AnUnversionedConfig_GetsADesktopReleaseWindowSpanningTheThreshold()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"v1-{Guid.NewGuid():N}.json");
+        try
+        {
+            WithProfiles(
+                    new FilterProfile { Name = "Desktop", ProcessNames = [], ChatterThresholdMs = 35, ReleaseDelayMs = 12 },
+                    new FilterProfile { Name = "Game", ProcessNames = ["javaw"], ChatterThresholdMs = 12, ReleaseDelayMs = 8 })
+                .Save(path);
+
+            var loaded = AppConfiguration.Load(path);
+
+            Assert.Equal(35, loaded.ResolveProfile("explorer").ReleaseDelayMs);
+            Assert.Equal(8, loaded.ResolveProfile("javaw").ReleaseDelayMs);
+            Assert.Equal(AppConfiguration.CurrentVersion, loaded.Version);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void ACurrentConfig_KeepsAShorterReleaseWindowItWasGiven()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"v2-{Guid.NewGuid():N}.json");
+        try
+        {
+            var config = WithProfiles(
+                new FilterProfile { Name = "Desktop", ProcessNames = [], ChatterThresholdMs = 35, ReleaseDelayMs = 12 });
+            config.Version = AppConfiguration.CurrentVersion;
+            config.Save(path);
+
+            Assert.Equal(12, AppConfiguration.Load(path).ResolveProfile("explorer").ReleaseDelayMs);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
