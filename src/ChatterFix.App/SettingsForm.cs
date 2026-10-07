@@ -16,6 +16,7 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _processes = new();
     private readonly NumericUpDown _threshold = new();
     private readonly NumericUpDown _releaseDelay = new();
+    private readonly NumericUpDown _holdRepair = new();
     private readonly CheckBox[] _buttons = new CheckBox[ClickStatistics.ButtonCount];
     private readonly CheckBox _notify = new();
     private readonly Label _fallbackNote = new();
@@ -42,7 +43,7 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(660, 480);
+        ClientSize = new Size(660, 552);
 
         BuildLayout();
 
@@ -141,6 +142,24 @@ internal sealed class SettingsForm : Form
         });
         y += 46;
 
+        Controls.Add(new Label { Text = "Hold repair", Location = new Point(x, y + 4), AutoSize = true });
+        _holdRepair.Location = new Point(x + 120, y);
+        _holdRepair.Width = 70;
+        _holdRepair.Minimum = 0;
+        _holdRepair.Maximum = 500;
+        Controls.Add(new Label { Text = "ms", Location = new Point(x + 196, y + 4), AutoSize = true });
+        y += 26;
+
+        Controls.Add(new Label
+        {
+            Text = "The same, once a press has been held longer than a click (150 ms).\n"
+                 + "Covers long breaks while dragging or holding. 0 switches it off.",
+            Location = new Point(x + 120, y),
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+        });
+        y += 46;
+
         Controls.Add(new Label { Text = "Buttons", Location = new Point(x, y + 2), AutoSize = true });
         int column = x + 120;
         for (int i = 0; i < _buttons.Length; i++)
@@ -161,14 +180,14 @@ internal sealed class SettingsForm : Form
         _fallbackNote.ForeColor = SystemColors.GrayText;
 
         _notify.Text = "Show a notification the first time a fault is blocked";
-        _notify.Location = new Point(16, 396);
+        _notify.Location = new Point(16, 468);
         _notify.AutoSize = true;
 
         var save = new Button
         {
             Text = "Save",
             DialogResult = DialogResult.OK,
-            Location = new Point(ClientSize.Width - 200, 430),
+            Location = new Point(ClientSize.Width - 200, 502),
             Width = 88,
         };
         save.Click += (_, _) => Commit();
@@ -177,14 +196,14 @@ internal sealed class SettingsForm : Form
         {
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
-            Location = new Point(ClientSize.Width - 104, 430),
+            Location = new Point(ClientSize.Width - 104, 502),
             Width = 88,
         };
 
         Controls.AddRange(
         [
             profilesLabel, _profileList, add, remove,
-            _name, _processes, _threshold, _releaseDelay,
+            _name, _processes, _threshold, _releaseDelay, _holdRepair,
             _fallbackNote, _notify, save, cancel,
         ]);
 
@@ -233,6 +252,7 @@ internal sealed class SettingsForm : Form
         _processes.Text = string.Join(", ", profile.ProcessNames);
         _threshold.Value = Math.Clamp(profile.ChatterThresholdMs, (int)_threshold.Minimum, (int)_threshold.Maximum);
         _releaseDelay.Value = Math.Clamp(profile.ReleaseDelayMs, (int)_releaseDelay.Minimum, (int)_releaseDelay.Maximum);
+        _holdRepair.Value = Math.Clamp(profile.HoldRepairMs, (int)_holdRepair.Minimum, (int)_holdRepair.Maximum);
 
         for (int i = 0; i < _buttons.Length; i++)
             _buttons[i].Checked = i >= profile.ButtonsEnabled.Length || profile.ButtonsEnabled[i];
@@ -255,6 +275,7 @@ internal sealed class SettingsForm : Form
         profile.ProcessNames = ParseProcessNames(_processes.Text);
         profile.ChatterThresholdMs = (int)_threshold.Value;
         profile.ReleaseDelayMs = (int)_releaseDelay.Value;
+        profile.HoldRepairMs = (int)_holdRepair.Value;
 
         var buttons = new bool[_buttons.Length];
         for (int i = 0; i < _buttons.Length; i++) buttons[i] = _buttons[i].Checked;

@@ -26,7 +26,10 @@ by a press. Measured on a worn switch, these breaks last 15–30 ms. ChatterFix 
 every release back for as long as the chatter threshold. If a press arrives inside
 that window the contact merely broke, so both events are dropped and the hold
 continues unbroken — a drag survives, and a phantom click right after a real one is
-folded into it. Otherwise the release is sent on. A drop that
+folded into it. A badly worn contact breaks for much longer, up to 160 ms, which is
+as long as the pause inside a double click. What tells them apart is the press
+before: a double click never starts with a long press, so once a press has lasted
+150 ms its release is held for the longer **hold repair** window instead. Otherwise the release is sent on. A drop that
 outlasts the window looks like chatter when the contact returns, so that press is
 swallowed at first — but if it is still held 30 ms later it was the hold resuming,
 not a bounce, and ChatterFix sends it after all.
@@ -55,10 +58,10 @@ reach thirty clicks a second, where 35 ms would start eating real clicks.
 
 So thresholds follow whichever application has focus:
 
-| Profile | Applies to | Threshold | Drop repair |
-|---|---|---|---|
-| Desktop | everything not listed elsewhere | 35 ms | 35 ms |
-| Fast clicking | `javaw`, `java`, `Minecraft`, `LunarClient`, … | 12 ms | 8 ms |
+| Profile | Applies to | Threshold | Drop repair | Hold repair |
+|---|---|---|---|---|
+| Desktop | everything not listed elsewhere | 35 ms | 35 ms | 200 ms |
+| Fast clicking | `javaw`, `java`, `Minecraft`, `LunarClient`, … | 12 ms | 8 ms | 200 ms |
 
 Profiles are editable in **Settings**; the one with no process names is the
 fallback and cannot be removed.
@@ -139,7 +142,7 @@ src/
   ChatterFix.App/           Tray application (WinForms)
   ChatterFix.Cli/           Diagnostics and measurement tool
 tests/
-  ChatterFix.Tests/         55 tests, including a 20,000-step balance invariant
+  ChatterFix.Tests/         57 tests, including a 20,000-step balance invariant
 ```
 
 ## Pitfalls
@@ -148,9 +151,10 @@ Things that cost real debugging time here, and will cost it again in any project
 that hooks Windows input:
 
 1. **Mend a break in a hold; do not swallow the press after it.** A worn contact
-   breaks for 15–30 ms mid-hold. If the release window is shorter than that, the
-   release goes out and the drag ends no matter what happens to the next press, so
-   the window has to span the whole chatter threshold. A press that is swallowed
+   breaks for 15–160 ms mid-hold. If the release window is shorter than that, the
+   release goes out and the drag ends no matter what happens to the next press.
+   Breaks that long overlap a double click's pause, so size the window by how long
+   the press has lasted, not by the gap alone. A press that is swallowed
    must take its release with it, or the button sticks down; a 20,000-step test
    asserts that balance.
 2. **Measure from the release, not from the previous press.** Press-to-press looks

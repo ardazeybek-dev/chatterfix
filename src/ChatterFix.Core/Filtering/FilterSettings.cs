@@ -28,8 +28,17 @@ public sealed record ButtonFilterSettings
     /// </summary>
     public int ReleaseDelayMs { get; init; }
 
+    /// <summary>
+    /// Once a press has been held longer than a click lasts, its release is held this
+    /// many milliseconds instead. A worn contact can break for well over 100 ms in the
+    /// middle of a hold, far longer than the gap inside a double click, but a double
+    /// click never starts with a long press. 0 disables it.
+    /// </summary>
+    public int HoldRepairMs { get; init; }
+
     internal long ChatterThresholdUs => (long)ChatterThresholdMs * 1000;
     internal long ReleaseDelayUs => (long)ReleaseDelayMs * 1000;
+    internal long HoldRepairUs => (long)HoldRepairMs * 1000;
 }
 
 /// <summary>

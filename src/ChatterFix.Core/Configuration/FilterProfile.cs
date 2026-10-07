@@ -25,6 +25,9 @@ public sealed class FilterProfile
 
     public int ReleaseDelayMs { get; set; } = 35;
 
+    /// <summary>Release window once a press has turned into a hold; see <see cref="ButtonFilterSettings.HoldRepairMs"/>.</summary>
+    public int HoldRepairMs { get; set; } = 200;
+
     public bool[] ButtonsEnabled { get; set; } = [true, true, true, true, true];
 
     public bool IsFallback => ProcessNames.Length == 0;
@@ -52,6 +55,7 @@ public sealed class FilterProfile
                 Enabled = i < ButtonsEnabled.Length && ButtonsEnabled[i],
                 ChatterThresholdMs = ChatterThresholdMs,
                 ReleaseDelayMs = ReleaseDelayMs,
+                HoldRepairMs = HoldRepairMs,
             };
         }
 
@@ -67,6 +71,7 @@ public sealed class FilterProfile
     {
         ChatterThresholdMs = Math.Clamp(ChatterThresholdMs, 1, 100);
         ReleaseDelayMs = Math.Clamp(ReleaseDelayMs, 0, 50);
+        HoldRepairMs = Math.Clamp(HoldRepairMs, 0, 500);
 
         if (ButtonsEnabled.Length != ClickStatistics.ButtonCount)
         {
@@ -94,6 +99,8 @@ public sealed class FilterProfile
             // folded into the click before it rather than reaching the application.
             ChatterThresholdMs = 35,
             ReleaseDelayMs = 35,
+            // Breaks inside a long hold were measured up to 160 ms.
+            HoldRepairMs = 200,
         },
         new()
         {
